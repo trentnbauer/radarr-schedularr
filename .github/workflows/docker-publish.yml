@@ -3,6 +3,7 @@ name: Build and Push to GHCR
 on:
   push:
     branches: [ "main" ]
+    tags: [ 'v*.*.*' ]
 
 env:
   REGISTRY: ghcr.io
@@ -26,9 +27,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase Image Name
-        run: |
-          echo "IMAGE_NAME=${IMAGE_NAME,,}" >>${GITHUB_ENV}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # 1. Always tag as 'latest'
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            
+            # 2. AUTO-INCREMENT: Creates tags like v0.1.45, v0.1.46, etc.
+            # We hardcode '0.1' and let GitHub fill in the run number.
+            type=raw,value=0.1.${{ github.run_number }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,4 +48,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
