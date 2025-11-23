@@ -1,12 +1,11 @@
 services:
-  christmas:
+  example:
     image: ghcr.io/trentnbauer/radarr-schedularr:latest
     restart: unless-stopped
     environment:
+      - TZ=${TZ:-Australia/Melbourne} ## Timezone
       - RADARR_URL=${RADARRURL:-http://localhost:7878} ## URL of your Radarr instance
       - RADARR_API_KEY=${APIKEY} ## Radarr API key
-      - LIST_NAME=${LIST} ##Script will match list name - NOT case sensitive
-      - TZ=${TZ:-Australia/Melbourne}  
-      # Format: Minute Hour Day Month DayOfWeek https://crontab.guru/
-      - START_DATE=${ENABLECRON}
-      - END_DATE=${DISABLECRON}
+      - LIST_NAME=${LIST} ## Script will match list name and is NOT case sensitive
+      - START_DATE=${STARTDATE} ## DD/MM
+      - END_DATE=${ENDDATE} ## DD/MM
