@@ -1,18 +1,8 @@
 import requests
 import sys
 import os
-from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
-
-# --- CONFIGURATION ---
-# We fetch these from the Docker Environment Variables
-RADARR_URL = os.environ.get("RADARR_URL")
-API_KEY = os.environ.get("RADARR_API_KEY")
-LIST_NAME = os.environ.get("LIST_NAME")
-ON_CRON = os.environ.get("ON_CRON") import requests
-import sys
-import os
 import time
+from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -20,150 +10,109 @@ from apscheduler.triggers.cron import CronTrigger
 RADARR_URL = os.environ.get("RADARR_URL")
 API_KEY = os.environ.get("RADARR_API_KEY")
 LIST_NAME = os.environ.get("LIST_NAME")
-ON_CRON = os.environ.get("ON_CRON") 
-OFF_CRON = os.environ.get("OFF_CRON")
+
+# format: "MM-DD", e.g., "12-01"
+START_DATE = os.environ.get("START_DATE") 
+END_DATE = os.environ.get("END_DATE")
 
 # Basic Validation
-if not all([RADARR_URL, API_KEY, LIST_NAME]):
-    print("Error: Missing mandatory env vars. Check docker-compose.yml")
+if not all([RADARR_URL, API_KEY, LIST_NAME, START_DATE, END_DATE]):
+    print("Error: Missing config. Check docker-compose.yml")
     sys.exit(1)
 
-if not ON_CRON and not OFF_CRON:
-    print("Error: No schedule provided. Set ON_CRON or OFF_CRON.")
-    sys.exit(1)
-
-# --- HEARTBEAT FUNCTION ---
+# --- HEARTBEAT ---
 def run_heartbeat():
-    """Updates a file timestamp so Docker knows we are alive"""
     with open("/tmp/healthy", "w") as f:
         f.write(str(time.time()))
 
-def toggle_list(enable_state):
+# --- CORE LOGIC ---
+def get_list_id(url, headers):
+    try:
+        res = requests.get(f"{url}/api/v3/importlist", headers=headers)
+        res.raise_for_status()
+        target = next((i for i in res.json() if i['name'].lower() == LIST_NAME.lower()), None)
+        if not target:
+            print(f"❌ Error: List '{LIST_NAME}' not found.")
+            return None
+        return target
+    except Exception as e:
+        print(f"❌ Connection Error: {e}")
+        return None
+
+def set_list_state(enable_state):
     action = "ENABLING" if enable_state else "DISABLING"
-    print(f"⏰ Triggered: {action} list '{LIST_NAME}'...")
-    
     url = RADARR_URL.rstrip("/")
     headers = {"X-Api-Key": API_KEY}
     
+    target = get_list_id(url, headers)
+    if not target: return
+
+    if target['enabled'] == enable_state:
+        print(f"ℹ️ State Check: List '{LIST_NAME}' is already {action} (Correct).")
+        return
+
+    print(f"⚙️ changing state: {action} list '{LIST_NAME}'...")
+    target['enabled'] = enable_state
     try:
-        # 1. Get All Lists
-        res = requests.get(f"{url}/api/v3/importlist", headers=headers)
-        if res.status_code == 401:
-            print("❌ Error: API Key Rejected.")
-            return
-        res.raise_for_status()
-        all_lists = res.json()
-        
-        # 2. Find Specific List
-        target = next((i for i in all_lists if i['name'].lower() == LIST_NAME.lower()), None)
-        
-        if not target:
-            print(f"❌ Error: List '{LIST_NAME}' not found.")
-            return
-
-        # 3. Update Status
-        if target['enabled'] == enable_state:
-            print(f"ℹ️ No change needed. List is already {'Enabled' if enable_state else 'Disabled'}.")
-            return
-
-        target['enabled'] = enable_state
-        
-        # 4. Push Update
         put_url = f"{url}/api/v3/importlist/{target['id']}"
         requests.put(put_url, json=target, headers=headers).raise_for_status()
-        print(f"✅ Success! List '{LIST_NAME}' is now {action}.")
-        
+        print(f"✅ Success! List is now {action}.")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Update Failed: {e}")
+
+def check_season_status():
+    """
+    Determines if we are currently INSIDE the active window.
+    """
+    now = datetime.now()
+    current_year = now.year
+    
+    # Parse config dates (append current year)
+    # We assume the config is "12-01", so we make it "2025-12-01"
+    d_start = datetime.strptime(f"{current_year}-{START_DATE}", "%Y-%m-%d")
+    d_end = datetime.strptime(f"{current_year}-{END_DATE}", "%Y-%m-%d")
+
+    # Handle "Over the New Year" (e.g. Dec 1 to Jan 2)
+    if d_start > d_end:
+        # If today is Jan 1, we compare against Start(Last Year) and End(This Year)
+        # If today is Dec 20, we compare against Start(This Year) and End(Next Year)
+        if now < d_start and now > d_end:
+            # We are in the middle gap (e.g. June), so NOT active
+            return False
+        return True
+    else:
+        # Standard range (e.g. June 1 to July 1)
+        return d_start <= now <= d_end
 
 if __name__ == "__main__":
-    scheduler = BlockingScheduler()
+    print("🚀 Container Starting...")
+    
+    # 1. IMMEDIATE STARTUP CHECK
+    # This fixes your "Started on the 2nd" issue
+    should_be_active = check_season_status()
+    print(f"📅 Date Check: Today is {datetime.now().strftime('%m-%d')}. Active Window: {START_DATE} to {END_DATE}.")
+    print(f"🧐 Verdict: List should be {'ACTIVE' if should_be_active else 'INACTIVE'}.")
+    
+    set_list_state(should_be_active)
 
-    # 1. Add Heartbeat (Runs every 1 minute)
+    # 2. SCHEDULE FUTURE TRIGGERS
+    scheduler = BlockingScheduler()
     scheduler.add_job(run_heartbeat, 'interval', minutes=1)
-    print("❤️ Heartbeat started.")
 
-    # 2. Add Schedules
-    if ON_CRON:
-        print(f"📅 Scheduler: Will ENABLE '{LIST_NAME}' at [{ON_CRON}]")
-        scheduler.add_job(toggle_list, CronTrigger.from_crontab(ON_CRON), args=[True])
+    # Parse Months/Days for Cron
+    s_m, s_d = START_DATE.split("-")
+    e_m, e_d = END_DATE.split("-")
 
-    if OFF_CRON:
-        print(f"📅 Scheduler: Will DISABLE '{LIST_NAME}' at [{OFF_CRON}]")
-        scheduler.add_job(toggle_list, CronTrigger.from_crontab(OFF_CRON), args=[False])
+    # Schedule Enable (Runs every year on Start Date at 08:00)
+    scheduler.add_job(set_list_state, CronTrigger(month=s_m, day=s_d, hour=8), args=[True])
+    print(f"⏰ Scheduled: Enable every year on {START_DATE} at 08:00")
 
-    print(f"🚀 Container started. Watching clock for list: {LIST_NAME}...")
+    # Schedule Disable (Runs every year on End Date at 08:00)
+    scheduler.add_job(set_list_state, CronTrigger(month=e_m, day=e_d, hour=8), args=[False])
+    print(f"⏰ Scheduled: Disable every year on {END_DATE} at 08:00")
     
     try:
-        # Write one heartbeat immediately so the container starts 'healthy'
         run_heartbeat()
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        pass
-OFF_CRON = os.environ.get("OFF_CRON")
-
-# Basic Validation
-if not all([RADARR_URL, API_KEY, LIST_NAME]):
-    print("Error: Missing mandatory env vars. Check docker-compose.yml")
-    sys.exit(1)
-
-if not ON_CRON and not OFF_CRON:
-    print("Error: No schedule provided. Set ON_CRON or OFF_CRON.")
-    sys.exit(1)
-
-def toggle_list(enable_state):
-    action = "ENABLING" if enable_state else "DISABLING"
-    print(f"⏰ Triggered: {action} list '{LIST_NAME}'...")
-    
-    # Clean URL
-    url = RADARR_URL.rstrip("/")
-    headers = {"X-Api-Key": API_KEY}
-    
-    try:
-        # 1. Get All Lists
-        res = requests.get(f"{url}/api/v3/importlist", headers=headers)
-        if res.status_code == 401:
-            print("❌ Error: API Key Rejected.")
-            return
-        res.raise_for_status()
-        all_lists = res.json()
-        
-        # 2. Find Specific List
-        target = next((i for i in all_lists if i['name'].lower() == LIST_NAME.lower()), None)
-        
-        if not target:
-            print(f"❌ Error: List '{LIST_NAME}' not found.")
-            return
-
-        # 3. Update Status
-        if target['enabled'] == enable_state:
-            print(f"ℹ️ No change needed. List is already {'Enabled' if enable_state else 'Disabled'}.")
-            return
-
-        target['enabled'] = enable_state
-        
-        # 4. Push Update
-        put_url = f"{url}/api/v3/importlist/{target['id']}"
-        requests.put(put_url, json=target, headers=headers).raise_for_status()
-        print(f"✅ Success! List '{LIST_NAME}' is now {action}.")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-if __name__ == "__main__":
-    scheduler = BlockingScheduler()
-
-    if ON_CRON:
-        print(f"📅 Scheduler: Will ENABLE '{LIST_NAME}' at [{ON_CRON}]")
-        scheduler.add_job(toggle_list, CronTrigger.from_crontab(ON_CRON), args=[True])
-
-    if OFF_CRON:
-        print(f"📅 Scheduler: Will DISABLE '{LIST_NAME}' at [{OFF_CRON}]")
-        scheduler.add_job(toggle_list, CronTrigger.from_crontab(OFF_CRON), args=[False])
-
-    print(f"🚀 Container started. Watching clock for list: {LIST_NAME}...")
-    
-    try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         pass
