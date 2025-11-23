@@ -49,11 +49,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=0.1.${{ github.run_number }}
-          # Standard Labels (Inside the image)
           labels: |
-            org.opencontainers.image.source=${{ github.event.repository.html_url }}
-          # --- THE FIX: Explicit Annotations Config (Outside the box) ---
-          annotations: |
             org.opencontainers.image.description=${{ steps.get_msg.outputs.COMMIT_MSG }}
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
 
@@ -66,6 +62,9 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          # 1. Apply stickers to the images inside
           labels: ${{ steps.meta.outputs.labels }}
-          # Use the specific annotations output from the step above
-          annotations: ${{ steps.meta.outputs.annotations }}
+          # 2. Apply stickers to the outside box (Index)
+          annotations: ${{ steps.meta.outputs.labels }}
+          # 3. Simplify the build (Remove "in-toto" clutter)
+          provenance: false
