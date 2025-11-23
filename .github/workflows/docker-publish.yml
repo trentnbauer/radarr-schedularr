@@ -4,12 +4,12 @@ on:
   push:
     branches: [ "main" ]
     tags: [ 'v*.*.*' ]
-    # --- WILDCARDS APPLIED HERE ---
     paths-ignore:
       - '**.md'
       - 'docker-compose*.yml'
       - '.gitignore'
       - 'LICENSE'
+      - '.github/**'
 
 env:
   REGISTRY: ghcr.io
@@ -38,11 +38,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # 1. TAGS (Version Numbers)
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=0.1.${{ github.run_number }}
-          # 2. LABELS (Description = Commit Message)
           labels: |
             org.opencontainers.image.description=${{ github.event.head_commit.message }}
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
