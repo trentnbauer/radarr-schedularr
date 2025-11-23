@@ -28,12 +28,14 @@ jobs:
         with:
           fetch-depth: 0 
 
+      # 1. Capture the Commit Message
       - name: Get Commit Message
         id: get_msg
         run: |
           MSG=$(git log -1 --pretty=format:'%s')
           echo "COMMIT_MSG=$MSG" >> "$GITHUB_OUTPUT"
 
+      # 2. Debug: Prove we caught it
       - name: Print Debug Message
         run: echo "The captured description is [${{ steps.get_msg.outputs.COMMIT_MSG }}]"
 
@@ -44,6 +46,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 3. Generate the Labels (including Description)
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -52,20 +55,21 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=0.1.${{ github.run_number }}
-          # We keep 'source' here as a label
           labels: |
+            org.opencontainers.image.description=${{ steps.get_msg.outputs.COMMIT_MSG }}
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 4. Build and Apply Labels AND Annotations
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          # Puts description INSIDE the box (Standard Docker Label)
           labels: ${{ steps.meta.outputs.labels }}
-          # --- THE FIX: Apply description as an ANNOTATION ---
-          annotations: |
-            org.opencontainers.image.description=${{ steps.get_msg.outputs.COMMIT_MSG }}
+          # Puts description OUTSIDE the box (Manifest Annotation - Required for GHCR)
+          annotations: ${{ steps.meta.outputs.labels }}
