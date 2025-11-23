@@ -1,0 +1,12 @@
+services:
+  christmas:
+    image: ghcr.io/trentnbauer/radarr-schedularr:latest
+    restart: unless-stopped
+    environment:
+      - RADARR_URL=${RADARRURL:-http://localhost:7878} ## URL of your Radarr instance
+      - RADARR_API_KEY=${APIKEY} ## Radarr API key
+      - LIST_NAME=${LIST} ##Script will match list name - NOT case sensitive
+      - TZ=${TZ:-Australia/Melbourne}  
+      # Format: Minute Hour Day Month DayOfWeek https://crontab.guru/
+      - ON_CRON=${ENABLECRON}
+      - OFF_CRON=${DISABLECRON}
