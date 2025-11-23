@@ -6,6 +6,7 @@ from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+
 # --- CONFIGURATION ---
 RADARR_URL = os.environ.get("RADARR_URL")
 API_KEY = os.environ.get("RADARR_API_KEY")
