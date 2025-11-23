@@ -1,0 +1,25 @@
+services:
+  christmas:
+    image: ghcr.io/trentnbauer/radarr-schedularr:latest
+    restart: unless-stopped
+    environment:
+      - RADARR_URL=${RADARRURL:-http://localhost:7878} ## URL of your Radarr instance
+      - RADARR_API_KEY=${APIKEY} ## Radarr API key
+      - LIST_NAME=Christmas ##Script will match list name - NOT case sensitive
+      - TZ=${TZ:-Australia/Melbourne}  
+      # Format: Minute Hour Day Month DayOfWeek
+      - ON_CRON=0 1 1 11 * #Enable @ Nov 1st at 1:00 AM
+      - OFF_CRON=0 8 2 1 * #Disable @ Jan 2nd at 8:00 AM
+      
+  halloween:
+    image: ghcr.io/trentnbauer/radarr-schedularr:latest
+    restart: unless-stopped
+    environment:
+      - RADARR_URL=${RADARRURL:-http://localhost:7878} ## URL of your Radarr instance
+      - RADARR_API_KEY=${APIKEY} ## Radarr API key
+      - LIST_NAME=Halloween ##Script will match list name - NOT case sensitive
+      - TZ=${TZ:-Australia/Melbourne}  
+      # Format: Minute Hour Day Month DayOfWeek
+      - ON_CRON=0 1 1 9 * #Enable @ Sept 1st at 1:00 AM
+      - OFF_CRON=0 8 2 11 * #Disable @ Nov 2nd at 8:00 AM
+      
