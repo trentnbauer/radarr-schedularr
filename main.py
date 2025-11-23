@@ -10,24 +10,27 @@ from apscheduler.triggers.cron import CronTrigger
 RADARR_URL = os.environ.get("RADARR_URL")
 API_KEY = os.environ.get("RADARR_API_KEY")
 LIST_NAME = os.environ.get("LIST_NAME")
-START_DATE = os.environ.get("START_DATE") 
-END_DATE = os.environ.get("END_DATE")
+START_DATE = os.environ.get("START_DATE")  # Format: DD/MM
+END_DATE = os.environ.get("END_DATE")      # Format: DD/MM
 
+# Basic Validation
 if not all([RADARR_URL, API_KEY, LIST_NAME, START_DATE, END_DATE]):
-    print("Error: Missing config.")
+    print("❌ Error: Missing configuration variables. Check docker-compose.yml.")
     sys.exit(1)
 
+# --- HEARTBEAT ---
 def run_heartbeat():
     with open("/tmp/healthy", "w") as f:
         f.write(str(time.time()))
 
+# --- RADARR API HELPERS ---
 def get_list_id(url, headers):
     try:
         res = requests.get(f"{url}/api/v3/importlist", headers=headers)
         res.raise_for_status()
         target = next((i for i in res.json() if i['name'].lower() == LIST_NAME.lower()), None)
         if not target:
-            print(f"❌ Error: List '{LIST_NAME}' not found.")
+            print(f"❌ Error: List '{LIST_NAME}' not found in Radarr.")
             return None
         return target
     except Exception as e:
@@ -43,52 +46,61 @@ def set_list_state(enable_state):
     if not target: return
 
     if target['enabled'] == enable_state:
-        # Only print if we are actually changing something to keep logs clean
-        # or print a debug message
-        # print(f"ℹ️ Verified: List is correctly {action}.")
         return
 
-    print(f"⚙️ State Mismatch detected! Fixing... {action} list '{LIST_NAME}'...")
+    print(f"⚙️ Mismatch detected! {action} list '{LIST_NAME}'...")
     target['enabled'] = enable_state
+    
     try:
         put_url = f"{url}/api/v3/importlist/{target['id']}"
         requests.put(put_url, json=target, headers=headers).raise_for_status()
-        print(f"✅ Success! List is now {action}.")
+        print(f"✅ Success! List '{LIST_NAME}' has been {action}.")
     except Exception as e:
         print(f"❌ Update Failed: {e}")
 
+# --- DATE LOGIC (UPDATED FOR DD/MM) ---
 def check_season_status():
     now = datetime.now()
     current_year = now.year
-    d_start = datetime.strptime(f"{current_year}-{START_DATE}", "%Y-%m-%d")
-    d_end = datetime.strptime(f"{current_year}-{END_DATE}", "%Y-%m-%d")
+    
+    # We combine USER DATE + CURRENT YEAR to create a full timestamp
+    # Input: "01/12" -> Becomes "01/12/2025"
+    try:
+        d_start = datetime.strptime(f"{START_DATE}/{current_year}", "%d/%m/%Y")
+        d_end = datetime.strptime(f"{END_DATE}/{current_year}", "%d/%m/%Y")
+    except ValueError as e:
+        print(f"❌ Date Format Error: Ensure config uses DD/MM (e.g., 01/12). Error: {e}")
+        sys.exit(1)
 
-    if d_start > d_end: # Over New Year
-        if now < d_start and now > d_end: return False
+    if d_start > d_end:
+        # New Year Wrap (e.g. 01/12 to 02/01)
+        if now < d_start and now > d_end:
+            return False
         return True
-    else: # Standard Year
+    else:
+        # Standard Range
         return d_start <= now <= d_end
 
-# Wrapper for the scheduler to run the check
+# --- MAIN LOOP ---
 def daily_enforcement():
-    print("☀️ Daily Check: Verifying list state matches the date...")
+    print(f"☀️ Daily Check ({datetime.now().strftime('%Y-%m-%d %H:%M')}): Verifying list state...")
     should_be_active = check_season_status()
+    
+    status_text = "ACTIVE" if should_be_active else "INACTIVE"
+    print(f"🧐 Verdict: List should be {status_text} (Window: {START_DATE} to {END_DATE})")
+    
     set_list_state(should_be_active)
 
 if __name__ == "__main__":
     print("🚀 Container Starting...")
     
-    # 1. IMMEDIATE CHECK
     daily_enforcement()
 
-    # 2. SCHEDULE
     scheduler = BlockingScheduler()
     scheduler.add_job(run_heartbeat, 'interval', minutes=1)
-
-    # 3. DAILY ENFORCEMENT (Run every day at 08:00 AM)
-    # This replaces the specific date triggers with a daily loop
     scheduler.add_job(daily_enforcement, CronTrigger(hour=8, minute=0))
-    print(f"⏰ Scheduled: Daily verification at 08:00 AM.")
+    
+    print(f"⏰ Scheduler active. Next check at 08:00 AM.")
     
     try:
         run_heartbeat()
